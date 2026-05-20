@@ -1,0 +1,179 @@
+---
+title: "STAT 644 - Final Project"
+author: "Capt Guadalupe Hernandez"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    keep_tex: true
+geometry: margin=1in
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results='hold', echo=FALSE, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(car)
+library(kableExtra)
+library(knitr)
+library(GGally)
+library(dplyr)
+library(gt)
+library(metR)
+library(tidyr)
+library(patchwork)
+library(leaps)
+library(olsrr)
+library(binom)
+library(EnvStats)
+library(BSDA)
+library(ANSM5)
+library(NSM3)
+library(PMCMRplus)
+library(exactRankTests)
+library(nortest)
+library(numbers)
+library(DescTools)
+library(vcdExtra)
+library(AICcmodavg)
+library(MASS)
+library(igraph)
+library(rfars)
+options(digits = 10)
+```
+
+## Load the Dataset
+
+```{r, results='hold'}
+df = read.csv("Student_Depression.csv")
+
+head(df, 10)
+```
+
+Based on the limited available metadata, the variables as be summarized as
+$$
+\begin{array}{l|l}
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\ \hline
+\text{id} & \text{Identifier} & \text{Unique identifier for each student record} \\ \hline
+\text{Gender} & \text{Categorical} & \text{Demographic identity (e.g., Male/Female)} \\ \hline
+\text{Age} & \text{Numerical} & \text{Age of the student} \\ \hline
+\text{City} & \text{Categorical} & \text{Geographical location or region} \\ \hline
+\text{Profession} & \text{Categorical} & \text{The student's field of study or career path} \\ \hline
+\text{Academic Pressure} & \text{Numerical} & \text{Self-reported level of academic stress (0–5 scale)} \\ \hline
+\text{Work Pressure} & \text{Numerical} & \text{Self-reported level of work-related stress (0–5 scale)} \\ \hline
+\text{CGPA} & \text{Numerical} & \text{Cumulative Grade Point Average} \\ \hline
+\text{Study Satisfaction} & \text{Numerical} & \text{Subjective satisfaction with studies (0–5 scale)} \\ \hline
+\text{Job Satisfaction} & \text{Numerical} & \text{Subjective satisfaction with work (0–5 scale)} \\ \hline
+\text{Sleep Duration} & \text{Categorical} & \text{Categories of daily sleep duration} \\ \hline
+\text{Dietary Habits} & \text{Categorical} & \text{Self-reported quality of dietary habits} \\ \hline
+\text{Degree} & \text{Categorical} & \text{Academic degree program being pursued} \\ \hline
+\text{Have you ever had suicidal thoughts} & \text{Categorical} & \text{Binary indicator (Yes/No) of suicidal ideation} \\ \hline
+\text{Work Study Hours} & \text{Numerical} & \text{Number of hours spent working or studying per day} \\ \hline
+\text{Financial.Stress} & \text{Numerical} & \text{Self-reported level of financial stress (0–5 scale)} \\ \hline
+\text{Family History of Mental Illness} & \text{Categorical} & \text{Binary indicator (Yes/No) of family mental health history} \\ \hline
+\text{Depression} & \text{Categorical} & \text{Target variable: Binary indicator (0 = No, 1 = Yes)} \\ 
+\end{array}
+$$
+
+## Data Cleaning
+
+```{r, results='hold'}
+# Check for missing values
+cat("Total missing values in dataset:", sum(is.na(df)), "\n")
+
+# ID missing values by column
+missing_col = colSums(is.na(df))
+print(missing_per_col[missing_col > 0])
+
+# Inspect variables for unexpected labels
+categorical_cols = c("Gender", "City", "Profession", "Sleep.Duration", 
+                      "Dietary.Habits", "Degree")
+
+cat("\n--- Categorical Variable levels ---\n")
+for (col in categorical_cols) {
+  cat("\nVariable:", col, "\n")
+  print(unique(df[[col]]))
+}
+
+# Check for duplicated rows
+duplicates = sum(duplicated(df))
+cat("\nTotal duplicate rows:", duplicates, "\n")
+```
+
+The list of cities generated above corresponds to major cities in India. Since our analysis does not involve aggregating or modeling outcomes at the city level, these city labels are not used in the inferential framework and do not impact the validity of the categorical analyses conducted below. However, we note the presence of a couple of clearly mislabeled observation (e.g., "Less than 5 Kalyan", "3.0"), which does not correspond to a valid city name. Because City is not included as a variable in any of the contingency table analyses or inferential models, these labeling inconsistencies are not corrected, as they have no effect on the results.
+
+We also observe that missing data occurs only in the variable Financial.Stress. Since this variable is not included in the primary analysis or any contingency table construction, and no inferential conclusions are drawn from it, the missingness does not affect the validity of the analysis conducted here. Therefore, no imputation or exclusion based on Financial.Stress is necessary for the research question of interest.
+
+The variable Sleep.Duration contains a category labeled "Others," which represents an undefined or non-standard response. This category includes only 18 observations out of approximately 27,901 total observations, making it negligible in magnitude. Because this category is not interpretable and does not represent a meaningful level of the ordinal exposure variable (sleep duration), these observations are removed prior to analysis. This ensures that the remaining categories reflect a well-defined ordinal structure, which is required for valid interpretation of trends and odds ratios.
+
+```{r, results='hold'}
+table(df$Sleep.Duration)
+```
+
+
+```{r, results='hold'}
+clean_df = df[df$Sleep.Duration != "Others", ]
+```
+
+
+## Research Question: Does the association between sleep duration and depression status differ significantly between genders in the university student population?
+
+This question asks whether sleep duration is associated with depression in the same way for both genders, or whether that relationship changes depending on gender. In other words, we are checking if the effect of sleep duration on depression is consistent for male and female students, or if gender influences the strength or pattern of that association.
+
+```{r, results='hold'}
+clean_df$Sleep.Duration = factor(clean_df$Sleep.Duration,
+                                 levels = c("Less than 5 hours",
+                                            "5-6 hours",
+                                            "7-8 hours",
+                                            "More than 8 hours"),
+                                 ordered = TRUE)
+
+contingency_table = xtabs(~ Depression + Sleep.Duration + Gender, data = clean_df)
+contingency_table
+```
+
+## Basic Descriptive Statistics
+
+The contingency tables in terms of proportions is given by
+```{r}
+# Create a function to generate the summary for any categorical column
+get_summary = function(data, var) {
+  data %>%
+    group_by({{var}}) %>%
+    summarise(n = n()) %>%
+    mutate(freq = paste0(n, " (", round(100 * n / sum(n), 1), "%)"))
+}
+
+# Apply to your variables
+summary_gender = get_summary(clean_df, Gender)
+summary_depr = get_summary(clean_df, Depression)
+summary_sleep = get_summary(clean_df, Sleep.Duration)
+
+# Results
+summary_gender
+summary_depr
+summary_sleep
+```
+
+
+We now show conditional proportions, such as $P(\text{Depression} = \text{Yes} \mid \text{Sleep}, \text{Gender})$. These proportions you are essentially calculating the row-wise percentages for each strata in the three-way table.
+```{r}
+# Calculate P(Depression | Sleep, Gender)
+conditional_probs = clean_df %>%
+  group_by(Gender, Sleep.Duration, Depression) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  group_by(Gender, Sleep.Duration) %>%
+  mutate(prob = n / sum(n)) %>%
+  filter(Depression == 1) # Filter for the "Yes" outcome
+
+print(conditional_probs)
+```
+
+
+
+
+
+
+
